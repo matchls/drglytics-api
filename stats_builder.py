@@ -36,6 +36,26 @@ HERO_STAT_ASSETS = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+import re
+
+def _format_stat_name(asset_name: str) -> str:
+    """
+    Convertit un nom d'asset brut en texte lisible.
+    Ex: "MS_Completed_DeepScan" → "Deep Scan"
+        "MS_Killed_TotalEnemies" → "Total Enemies"
+    Analogie : c'est un traducteur qui enlève le jargon technique
+    et ajoute des espaces là où les mots sont collés.
+    """
+    # Enlever le préfixe "MS_MotCle_"
+    name = re.sub(r'^MS_[^_]+_', '', asset_name)
+    # Enlever le préfixe "MS_" seul (ex: MS_TimePlayed)
+    name = re.sub(r'^MS_', '', name)
+    # Ajouter un espace avant chaque majuscule qui suit une minuscule
+    # "DeepScan" → "Deep Scan"
+    name = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', name)
+    return name
+
+
 def _build_mission_stats(counters: list) -> dict:
     """
     Prend la liste brute des MissionStatCounters et retourne :
@@ -66,10 +86,20 @@ def _build_mission_stats(counters: list) -> dict:
             raw[stat_guid] = {}
         raw[stat_guid][class_guid] = value
 
+    # Stats avec unités spéciales
+    UNIT_MAP = {
+        "MS_DistanceTravelled": "cm",
+        "MS_TimePlayed": "s",
+    }
+
     # Construire la structure finale
     by_stat = {}
     for stat_guid, class_values in raw.items():
         info = get_stat_info(stat_guid)
+
+        # Ignorer les stats inconnues (GUID absent du stat_guids.json)
+        if info["category"] == "Unknown":
+            continue
 
         # Résoudre les GUIDs de classes en noms
         by_class = {}
@@ -79,12 +109,14 @@ def _build_mission_stats(counters: list) -> dict:
             by_class[class_name] = value
             total += value
 
-        by_stat[info["asset_name"]] = {
+        asset_name = info["asset_name"]
+        by_stat[asset_name] = {
             "guid": stat_guid,
-            "name": info["name"],
+            "name": _format_stat_name(asset_name),
             "category": get_stat_category_name(info["category"]),
             "category_key": info["category"],
             "type": info["type"],
+            "unit": UNIT_MAP.get(asset_name, ""),
             "total": total,
             "by_class": by_class,
         }

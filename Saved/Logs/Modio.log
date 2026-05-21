@@ -1,8 +1,0 @@
-[16:35:47:628ms][Info][Core] Initializing mod.io services
-[16:35:47:632ms][Info][File] Initialized File Service
-[16:35:47:643ms][Info][File] Overriding RootLocalStoragePath to C:\Users\Public\mod.io\
-[16:35:47:646ms][Info][Http] Initialized Http Service
-[16:35:47:664ms][Info][User] Initialized User Data service
-[16:35:47:666ms][Info][Core] mod.io service initialization complete
-[16:35:58:248ms][Info][Http] Initializing POST request for g-2475.modapi.io /v1/external/steamauth?api_key=b4aab104219c1f6d752beb37e483b17b
-[16:35:58:633ms][Error][Http] Non 200-204 response received: {"error":{"code":403,"error_ref":11074,"message":"You must agree to the latest mod.io Terms of Use and Privacy Policy to continue."}}
