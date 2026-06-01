@@ -13,6 +13,11 @@ Size field semantics (verified by binary analysis):
 """
 import struct, json, sys
 
+# Garde-fous anti-DoS (#1, V9). Un .sav forgé pourrait imbriquer des structs à
+# l'infini (récursion → stack overflow) ou annoncer un `count` de tableau énorme
+# (boucle longue). On borne les deux. Les vraies saves DRG restent loin de ces seuils.
+MAX_DEPTH = 100  # profondeur d'imbrication des propriétés
+
 def rs(data, o):
     l, = struct.unpack_from('<i', data, o); o += 4
     if l == 0: return "", o
@@ -32,8 +37,10 @@ class GVASParser:
     def str(self,o): return rs(self.d,o)
     def guid(self,o): return self.d[o:o+16].hex(),o+16
 
-    def parse_props(self, o, end=None):
+    def parse_props(self, o, end=None, depth=0):
         if end is None: end = len(self.d)
+        if depth > MAX_DEPTH:
+            raise ValueError(f"Nesting too deep (>{MAX_DEPTH}) @ {o}")
         obj = {}
         while o < end - 4:
             try: name, o = self.str(o)
@@ -43,11 +50,11 @@ class GVASParser:
                 tname, o = self.str(o)
                 size,    o = self.i64(o)
             except: break
-            val, o = self.parse_val(o, tname, size)
+            val, o = self.parse_val(o, tname, size, depth)
             obj[name] = val
         return obj, o
 
-    def parse_val(self, o, tname, size):
+    def parse_val(self, o, tname, size, depth=0):
         # --- Scalar types: tag(1) + size bytes ---
         if tname == "BoolProperty":
             v, o = self.u8(o); return bool(v), o+1   # tag=value, +1 padding
@@ -74,7 +81,7 @@ class GVASParser:
             elif stype in ("DateTime","Timespan"):
                 v, o = self.i64(o)
             else:
-                v, o = self.parse_props(o, data_end)
+                v, o = self.parse_props(o, data_end, depth + 1)
                 v["_type"] = stype
             return v, data_end
 
@@ -87,6 +94,12 @@ class GVASParser:
             o += 1; count, o = self.i32(o)
             arr = []
 
+            # `count` est lu DIRECTEMENT du fichier : un .sav forgé pourrait y mettre
+            # une valeur énorme → boucle interminable. Chaque item pèse au moins 1
+            # octet, donc count ne peut pas dépasser le nombre d'octets restants.
+            if count < 0 or count > len(self.d):
+                raise ValueError(f"Bad array count {count} @ {o-4}")
+
             if itype_str == "StructProperty":
                 _, o  = self.str(o)
                 _, o  = self.str(o)
@@ -97,7 +110,7 @@ class GVASParser:
                     if st == "Guid":
                         item, o = self.guid(o)
                     else:
-                        item, o = self.parse_props(o, true_end)
+                        item, o = self.parse_props(o, true_end, depth + 1)
                         item["_type"] = st
                     arr.append(item)
 
