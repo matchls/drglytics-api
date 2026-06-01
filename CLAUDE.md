@@ -145,17 +145,6 @@ drg_dashboard_frontend/
 
 ---
 
-## Couleurs des classes
-
-```
-Driller  : #e6c020  (jaune)
-Gunner   : #d44a4a  (rouge)
-Engineer : #5cba5c  (vert)
-Scout    : #4a8fd4  (bleu)
-```
-
----
-
 ## Règles de code
 
 - **Noms de variables :** anglais, descriptifs (`playerStats` pas `ps`, `missionCount` pas `n`)
