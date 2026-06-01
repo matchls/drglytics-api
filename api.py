@@ -15,13 +15,14 @@ Usage local :
     → http://localhost:5000
 """
 
-import io
-import json
 import tempfile
 import os
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from parse_save import parse_gvas
 from stats_builder import build_dashboard_data
@@ -30,9 +31,32 @@ from stats_builder import build_dashboard_data
 
 app = Flask(__name__)
 
-# CORS : autorise le frontend React (localhost:5173 en dev, Vercel en prod)
-# En production, remplacer "*" par l'URL exacte du frontend Vercel
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+# Derrière le reverse-proxy de l'hébergeur (Railway/Vercel), l'IP cliente réelle
+# se trouve dans l'en-tête X-Forwarded-For, pas dans remote_addr (qui vaut l'IP
+# interne du proxy, identique pour tous). ProxyFix la restaure pour que le rate
+# limiting compte bien PAR visiteur. x_for=1 = on ne fait confiance qu'à UNE
+# couche de proxy ; sinon X-Forwarded-For redeviendrait spoofable par le client.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# CORS : on n'autorise QUE les origines explicitement déclarées (plus de "*",
+# qui laissait n'importe quel site appeler l'API). La liste vient d'une variable
+# d'env ALLOWED_ORIGINS (séparée par des virgules). En local, défaut = front Next.
+# Ex. prod : ALLOWED_ORIGINS="https://drg-dashboard.vercel.app"
+allowed_origins = [
+    origin.strip()
+    for origin in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+
+# Rate limiting : plafonne les appels par IP pour éviter l'abus de ressources.
+# ⚠️ Stockage en mémoire par défaut (suffisant pour un backend mono-process type
+# Railway). Pour du multi-instance, brancher un storage_uri Redis.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["60 per hour"],
+)
 
 # ── Limites ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +67,7 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE_MB * 1024 * 1024
 # ── Endpoint principal ────────────────────────────────────────────────────────
 
 @app.route("/api/parse", methods=["POST"])
+@limiter.limit("10 per minute")  # parsing = opération coûteuse → plafond serré
 def parse_save_file():
     """
     Reçoit un fichier .sav et un pseudo, retourne les stats du dashboard.
@@ -80,29 +105,35 @@ def parse_save_file():
     # 3. Parser le fichier .sav
     #    On écrit dans un fichier temporaire car parse_gvas attend un chemin
     #    Le fichier est automatiquement supprimé après le bloc "with"
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
             tmp_path = tmp.name
             file.save(tmp_path)
-
-        try:
-            raw_save = parse_gvas(tmp_path)
-        finally:
-            os.unlink(tmp_path)  # toujours supprimer, même en cas d'erreur
-
-    except Exception as e:
+        raw_save = parse_gvas(tmp_path)
+    except Exception:
+        # On logue le détail réel côté serveur (avec la stack trace)...
+        app.logger.exception("parse_gvas a échoué")
+        # ...mais on ne renvoie qu'un message générique au client (pas de fuite
+        # d'internes du parseur, qui aideraient à forger un .sav malveillant).
         return jsonify({
             "ok": False,
-            "error": f"Failed to parse save file: {str(e)}"
+            "error": "Could not parse the save file."
         }), 422
+    finally:
+        # Toujours supprimer le fichier temporaire, y compris si file.save() a
+        # échoué après sa création (sinon il fuiterait sur le disque).
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     # 4. Construire les données du dashboard
     try:
         dashboard_data = build_dashboard_data(raw_save, player_name)
-    except Exception as e:
+    except Exception:
+        app.logger.exception("build_dashboard_data a échoué")
         return jsonify({
             "ok": False,
-            "error": f"Failed to build dashboard: {str(e)}"
+            "error": "Could not build the dashboard."
         }), 500
 
     return jsonify({"ok": True, "data": dashboard_data})
@@ -111,6 +142,7 @@ def parse_save_file():
 # ── Health check (utile pour Vercel et les monitors) ─────────────────────────
 
 @app.route("/api/health", methods=["GET"])
+@limiter.exempt  # les monitors pingent souvent (>60/h) : ne pas les bloquer en 429
 def health():
     return jsonify({"ok": True, "service": "drg-dashboard-api"})
 
@@ -132,11 +164,20 @@ def not_found(e):
 def method_not_allowed(e):
     return jsonify({"ok": False, "error": "Method not allowed"}), 405
 
+@app.errorhandler(429)
+def rate_limited(e):
+    return jsonify({"ok": False, "error": "Too many requests. Slow down."}), 429
+
 
 # ── Lancement local ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # debug=True ouvre la console Werkzeug (exécution de code à distance si exposée)
+    # et fait fuiter les stack traces. On le pilote par env, désactivé par défaut.
+    # En local : FLASK_DEBUG=1 python api.py
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
     print("DRG Dashboard API — http://localhost:5000")
     print("Endpoint : POST /api/parse")
     print("           GET  /api/health")
-    app.run(debug=True, port=5000)
+    print(f"Debug : {'ON' if debug else 'OFF'}")
+    app.run(debug=debug, port=5000)
