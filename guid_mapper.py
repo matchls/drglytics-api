@@ -49,23 +49,15 @@ CLASS_GUIDS: dict[str, str] = {
     "ae56e180fec0c44d96fa29c28366b97b": "Scout",
 }
 
-CLASS_COLORS: dict[str, str] = {
-    "Driller":  "#e6c020",
-    "Gunner":   "#d44a4a",
-    "Engineer": "#5cba5c",
-    "Scout":    "#4a8fd4",
-}
-
 # ── API publique ──────────────────────────────────────────────────────────────
+#
+# Note : les couleurs de classe sont gérées côté frontend (lib/types.ts,
+# CLASS_COLORS), source unique. Le backend ne renvoie volontairement aucune
+# couleur (préoccupation de présentation).
 
 def get_class_name(class_guid: str) -> str:
     """Retourne le nom de la classe à partir de son GUID."""
     return CLASS_GUIDS.get(class_guid.lower(), f"Unknown ({class_guid[:8]}...)")
-
-
-def get_class_color(class_name: str) -> str:
-    """Retourne la couleur hex associée à une classe."""
-    return CLASS_COLORS.get(class_name, "#888888")
 
 
 def get_stat_info(stat_guid: str) -> dict:
@@ -147,7 +139,7 @@ def get_all_stats() -> dict:
 if __name__ == "__main__":
     print("=== Classes ===")
     for guid, name in CLASS_GUIDS.items():
-        print(f"  {name}: {guid} ({get_class_color(name)})")
+        print(f"  {name}: {guid}")
 
     print("\n=== Test stat GUID ===")
     test_guids = [
