@@ -11,7 +11,6 @@ et les dispose dans des vitrines thématiques.
 
 from guid_mapper import (
     get_class_name,
-    get_class_color,
     get_stat_info,
     get_overclock_info,
     get_stat_category_name,
@@ -191,7 +190,6 @@ def _build_class_summary(mission_stats: dict) -> list:
     [
         {
             "name": "Driller",
-            "color": "#e6c020",
             "missions_completed": 525,
             "kills": 18433,
             ...
@@ -210,7 +208,6 @@ def _build_class_summary(mission_stats: dict) -> list:
     classes = {
         name: {
             "name": name,
-            "color": get_class_color(name),
             "missions_completed": 0,
             "kills": 0,
             "time_played_s": 0,
