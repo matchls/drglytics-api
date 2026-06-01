@@ -15,7 +15,6 @@ Usage local :
     → http://localhost:5000
 """
 
-import logging
 import tempfile
 import os
 
@@ -23,6 +22,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from parse_save import parse_gvas
 from stats_builder import build_dashboard_data
@@ -30,6 +30,13 @@ from stats_builder import build_dashboard_data
 # ── App Flask ─────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+
+# Derrière le reverse-proxy de l'hébergeur (Railway/Vercel), l'IP cliente réelle
+# se trouve dans l'en-tête X-Forwarded-For, pas dans remote_addr (qui vaut l'IP
+# interne du proxy, identique pour tous). ProxyFix la restaure pour que le rate
+# limiting compte bien PAR visiteur. x_for=1 = on ne fait confiance qu'à UNE
+# couche de proxy ; sinon X-Forwarded-For redeviendrait spoofable par le client.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # CORS : on n'autorise QUE les origines explicitement déclarées (plus de "*",
 # qui laissait n'importe quel site appeler l'API). La liste vient d'une variable
@@ -98,16 +105,12 @@ def parse_save_file():
     # 3. Parser le fichier .sav
     #    On écrit dans un fichier temporaire car parse_gvas attend un chemin
     #    Le fichier est automatiquement supprimé après le bloc "with"
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
             tmp_path = tmp.name
             file.save(tmp_path)
-
-        try:
-            raw_save = parse_gvas(tmp_path)
-        finally:
-            os.unlink(tmp_path)  # toujours supprimer, même en cas d'erreur
-
+        raw_save = parse_gvas(tmp_path)
     except Exception:
         # On logue le détail réel côté serveur (avec la stack trace)...
         app.logger.exception("parse_gvas a échoué")
@@ -117,6 +120,11 @@ def parse_save_file():
             "ok": False,
             "error": "Could not parse the save file."
         }), 422
+    finally:
+        # Toujours supprimer le fichier temporaire, y compris si file.save() a
+        # échoué après sa création (sinon il fuiterait sur le disque).
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     # 4. Construire les données du dashboard
     try:
@@ -134,6 +142,7 @@ def parse_save_file():
 # ── Health check (utile pour Vercel et les monitors) ─────────────────────────
 
 @app.route("/api/health", methods=["GET"])
+@limiter.exempt  # les monitors pingent souvent (>60/h) : ne pas les bloquer en 429
 def health():
     return jsonify({"ok": True, "service": "drg-dashboard-api"})
 
