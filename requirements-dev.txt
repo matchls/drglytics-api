@@ -1,0 +1,4 @@
+# Dépendances de développement / test uniquement.
+# NE PAS installer en production (Vercel/Railway n'embarque que requirements.txt).
+# Installation locale :  pip install -r requirements-dev.txt
+pytest>=8,<9
