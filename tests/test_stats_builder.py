@@ -139,7 +139,10 @@ def test_overclocks_counts(dashboard):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_invariant_missions_sum_equals_hero_total(dashboard):
-    """La somme des missions par classe doit égaler le total héros 'Total Missions'."""
+    """Cohérence observée sur cette fixture : la somme des missions par classe
+    égale le total héros 'Total Missions'. NB : ces deux valeurs viennent de
+    stats sources distinctes — l'égalité n'est pas garantie par le code pour
+    toute save, on la verrouille telle qu'observée sur player_save_example.json."""
     classes = dashboard["classes"]
     hero_total = dashboard["hero_stats"]["MS_Completed_TotalMissions"]["total"]
     sum_per_class = sum(c["missions_completed"] for c in classes)
