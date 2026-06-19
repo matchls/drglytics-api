@@ -43,10 +43,10 @@ def _load_stat_guids() -> dict:
 # ── GUIDs des classes (hard-codés, stables dans le jeu) ──────────────────────
 
 CLASS_GUIDS: dict[str, str] = {
-    "30d8ea17d8fbba4c95306de9655c2f8c": "Driller",
-    "9edd56f1eebcc5488d5b5e5b80b62db4": "Gunner",
+    "30d8ea17d8fbba4c95306de9655c2f8c": "Scout",
+    "9edd56f1eebcc5488d5b5e5b80b62db4": "Driller",
     "85ef626c65f1024a8dfeb5d0f3909d2e": "Engineer",
-    "ae56e180fec0c44d96fa29c28366b97b": "Scout",
+    "ae56e180fec0c44d96fa29c28366b97b": "Gunner",
 }
 
 # ── API publique ──────────────────────────────────────────────────────────────
