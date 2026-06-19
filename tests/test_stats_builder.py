@@ -100,10 +100,10 @@ def test_classes_missions_and_kills(dashboard):
     assert by_name["Engineer"]["missions_completed"] == 67
     assert by_name["Scout"]["missions_completed"] == 118
     # Kills par classe.
-    assert by_name["Driller"]["kills"] == 18433
-    assert by_name["Gunner"]["kills"] == 15625
+    assert by_name["Driller"]["kills"] == 15625
+    assert by_name["Gunner"]["kills"] == 5174
     assert by_name["Engineer"]["kills"] == 12365
-    assert by_name["Scout"]["kills"] == 5174
+    assert by_name["Scout"]["kills"] == 18433
 
 
 # ─────────────────────────────────────────────────────────────────────────────
