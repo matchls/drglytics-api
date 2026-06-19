@@ -17,6 +17,7 @@ Usage local :
 
 import tempfile
 import os
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -63,6 +64,13 @@ limiter = Limiter(
 MAX_FILE_SIZE_MB = 5
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE_MB * 1024 * 1024
 
+# Timeout du parser GVAS (secondes). Configurable via env pour les déploiements
+# où le parsing peut être plus lent (machines partagées, gros fichiers).
+PARSE_TIMEOUT_S = int(os.environ.get("PARSE_TIMEOUT_S", "30"))
+
+# Magic bytes au début de tout fichier GVAS (Unreal Engine save format).
+GVAS_MAGIC = b"GVAS"
+
 
 # ── Endpoint principal ────────────────────────────────────────────────────────
 
@@ -92,7 +100,7 @@ def parse_save_file():
     if not file.filename:
         return jsonify({"ok": False, "error": "Empty filename"}), 400
 
-    if not file.filename.endswith(".sav"):
+    if not file.filename.lower().endswith(".sav"):
         return jsonify({"ok": False, "error": "File must be a .sav file"}), 400
 
     # 2. Vérifier le pseudo
@@ -103,26 +111,40 @@ def parse_save_file():
         return jsonify({"ok": False, "error": "player_name too long (max 64 chars)"}), 400
 
     # 3. Parser le fichier .sav
-    #    On écrit dans un fichier temporaire car parse_gvas attend un chemin
-    #    Le fichier est automatiquement supprimé après le bloc "with"
+    #    On écrit dans un fichier temporaire car parse_gvas attend un chemin.
+    #    Le finally garantit la suppression du fichier même en cas d'erreur.
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
             tmp_path = tmp.name
             file.save(tmp_path)
-        raw_save = parse_gvas(tmp_path)
+
+        # Validation post-sauvegarde : fichier vide
+        if os.path.getsize(tmp_path) == 0:
+            return jsonify({"ok": False, "error": "File is empty"}), 400
+
+        # Validation post-sauvegarde : signature GVAS (magic bytes)
+        # Un fichier non-GVAS serait rejeté ici avant même d'entrer dans le parser.
+        with open(tmp_path, "rb") as f:
+            if f.read(4) != GVAS_MAGIC:
+                return jsonify({"ok": False, "error": "Could not parse the save file."}), 422
+
+        # Parser dans un process séparé avec timeout.
+        # Un process (et non un thread) permet à l'OS d'interrompre réellement
+        # le parsing si le fichier est malformé et bloque le parser indéfiniment.
+        executor = ProcessPoolExecutor(max_workers=1)
+        try:
+            raw_save = executor.submit(parse_gvas, tmp_path).result(timeout=PARSE_TIMEOUT_S)
+        except FuturesTimeoutError:
+            app.logger.error("parse_gvas timed out after %ds", PARSE_TIMEOUT_S)
+            return jsonify({"ok": False, "error": "Could not parse the save file."}), 422
+        finally:
+            executor.shutdown(wait=False)
+
     except Exception:
-        # On logue le détail réel côté serveur (avec la stack trace)...
         app.logger.exception("parse_gvas a échoué")
-        # ...mais on ne renvoie qu'un message générique au client (pas de fuite
-        # d'internes du parseur, qui aideraient à forger un .sav malveillant).
-        return jsonify({
-            "ok": False,
-            "error": "Could not parse the save file."
-        }), 422
+        return jsonify({"ok": False, "error": "Could not parse the save file."}), 422
     finally:
-        # Toujours supprimer le fichier temporaire, y compris si file.save() a
-        # échoué après sa création (sinon il fuiterait sur le disque).
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
